@@ -1,6 +1,4 @@
-Here’s a brief repo-ready summary you can put in `README.md` or `docs/project_summary.md`.
 
-````markdown
 # Autonomous Mower Pi 5 Project
 
 This project is a ROS2-based autonomous mower platform using a Raspberry Pi 5 as the main computer and an Arduino Uno R4 Minima as the low-level motor/sensor interface.
@@ -214,6 +212,3 @@ ZS-X11H speed pulse output
 ```
 
 The project may eventually migrate from the custom serial bridge to a `ros2_control` hardware interface with `diff_drive_controller`.
-
-```
-```
