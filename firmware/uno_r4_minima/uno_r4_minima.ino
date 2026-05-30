@@ -9,8 +9,11 @@ volatile unsigned long right_total_pulses = 0;
 
 unsigned long last_report_ms = 0;
 const unsigned long REPORT_INTERVAL_MS = 200;
+const unsigned long BRIDGE_TIMEOUT_MS = 1000;
 
-int pwm_value = 20;
+int pwm_value = 0;
+bool bridge_connected = false;
+unsigned long last_bridge_ms = 0;
 bool calibration_active = false;
 unsigned long calibration_left_start = 0;
 unsigned long calibration_right_start = 0;
@@ -31,6 +34,31 @@ void setPwm(int value) {
 
   Serial.print("OK PWM ");
   Serial.println(pwm_value);
+}
+
+void stopPwmForSafety(const char *reason) {
+  if (pwm_value != 0) {
+    pwm_value = 0;
+    analogWrite(PWM_OUT_PIN, pwm_value);
+
+    Serial.print("SAFE_STOP ");
+    Serial.println(reason);
+  }
+}
+
+bool requireBridgeForMotion() {
+  if (bridge_connected) {
+    return true;
+  }
+
+  stopPwmForSafety("NO_BRIDGE");
+  Serial.println("ERR NO_BRIDGE");
+  return false;
+}
+
+void markBridgeHeartbeat() {
+  bridge_connected = true;
+  last_bridge_ms = millis();
 }
 
 void resetCounts() {
@@ -134,6 +162,8 @@ void loop() {
 
     if (cmd == "PING") {
       Serial.println("PONG");
+    } else if (cmd == "BRIDGE_HEARTBEAT") {
+      markBridgeHeartbeat();
     } else if (cmd == "LED_ON") {
       digitalWrite(LED_BUILTIN, HIGH);
       Serial.println("OK LED_ON");
@@ -144,7 +174,9 @@ void loop() {
       Serial.print("STATUS OK PWM ");
       Serial.print(pwm_value);
       Serial.print(" CAL_ACTIVE ");
-      Serial.println(calibration_active ? 1 : 0);
+      Serial.print(calibration_active ? 1 : 0);
+      Serial.print(" BRIDGE_CONNECTED ");
+      Serial.println(bridge_connected ? 1 : 0);
     } else if (cmd == "CAL_START") {
       startCalibration();
     } else if (cmd == "CAL_STATUS") {
@@ -164,14 +196,22 @@ void loop() {
     } else if (cmd == "PWM_OFF") {
       setPwm(0);
     } else if (cmd == "PWM_SLOW") {
-      setPwm(20);
+      if (requireBridgeForMotion()) {
+        setPwm(20);
+      }
     } else if (cmd == "PWM_UP") {
-      setPwm(pwm_value + 5);
+      if (requireBridgeForMotion()) {
+        setPwm(pwm_value + 5);
+      }
     } else if (cmd == "PWM_DOWN") {
-      setPwm(pwm_value - 5);
+      if (requireBridgeForMotion()) {
+        setPwm(pwm_value - 5);
+      }
     } else if (cmd.startsWith("PWM ")) {
       int value = cmd.substring(4).toInt();
-      setPwm(value);
+      if (value == 0 || requireBridgeForMotion()) {
+        setPwm(value);
+      }
     } else {
       Serial.print("UNKNOWN ");
       Serial.println(cmd);
@@ -179,6 +219,11 @@ void loop() {
   }
 
   unsigned long now = millis();
+
+  if (bridge_connected && now - last_bridge_ms > BRIDGE_TIMEOUT_MS) {
+    bridge_connected = false;
+    stopPwmForSafety("BRIDGE_TIMEOUT");
+  }
 
   if (now - last_report_ms >= REPORT_INTERVAL_MS) {
     last_report_ms = now;

@@ -102,7 +102,8 @@ The Arduino firmware currently supports:
 * PWM output on pin D9
 * Left speed pulse input on D2
 * Right speed pulse input on D3
-* Serial commands such as `PWM_OFF`, `PWM_SLOW`, `PWM <value>`, `RESET_COUNTS`, `CAL_START`, `CAL_STOP <revolutions>`, `PING`, `LED_ON`, and `LED_OFF`
+* Serial commands such as `PWM_OFF`, `PWM_SLOW`, `PWM <value>`, `RESET_COUNTS`, `CAL_START`, `CAL_STOP <revolutions>`, `BRIDGE_HEARTBEAT`, `PING`, `LED_ON`, and `LED_OFF`
+* PWM defaults to 0 on boot and nonzero PWM commands require an active ROS2 bridge heartbeat
 * Periodic serial output of speed pulse counts, frequency, total counts, and PWM value
 
 Example output:
@@ -205,7 +206,7 @@ After reset, the Arduino should print:
 
 ```text
 BOOT UNO_R4_SPEED_PWM_TOTAL_TEST
-PWM_START 20
+PWM_START 0
 ```
 
 The firmware then prints hall/speed counts about every 200 ms:
@@ -250,12 +251,15 @@ PING
 
 Suggested test flow:
 
-```text
-RESET_COUNTS
-PWM 20
+Use `make bridge` in one terminal, then send motor commands through ROS2 from a second terminal. The bridge sends `BRIDGE_HEARTBEAT` automatically.
+
+```bash
+cd ~/mower_ws
+make reset
+make pwm VALUE=20
 ```
 
-Then watch the `SPEED_COUNTS`, `HZ`, and `TOTAL` fields. Increase PWM slowly only when the mower is safely supported, the wheels are clear, and the motor driver wiring has been checked.
+The firmware stops PWM if the bridge heartbeat is missing for about 1 second. Direct serial monitor mode is best for reading counts and calibration; motor motion commands should go through the bridge heartbeat path. Increase PWM slowly only when the mower is safely supported, the wheels are clear, and the motor driver wiring has been checked.
 
 ## Calibrating Speed Counts Per Revolution
 
@@ -277,6 +281,20 @@ The Arduino prints a result like:
 
 ```text
 CAL_RESULT REVS 10.000 LEFT_COUNTS 420 RIGHT_COUNTS 0 LEFT_COUNTS_PER_REV 42.000 RIGHT_COUNTS_PER_REV 0.000
+```
+
+Latest measured calibration:
+
+```text
+speed_counts_per_wheel_rev: 205
+```
+
+This means:
+
+```text
+1 wheel revolution = 205 speed counts
+1 speed count      = 1 / 205 wheel revolutions
+1 speed count      = 2*pi / 205 wheel radians
 ```
 
 Useful calibration commands:
@@ -306,7 +324,7 @@ The ROS2 bridge continuously drains and logs Arduino serial output while it is r
 ## Near-Term Development Goals
 
 1. Connect and test both BLDC motor driver speed pulse outputs.
-2. Calibrate pulses per wheel revolution.
+2. Verify the 205 counts/rev calibration on both wheels.
 3. Convert pulse counts to wheel speed.
 4. Add left/right PWM outputs for differential drive.
 5. Update the serial protocol from raw string commands to structured mower commands.

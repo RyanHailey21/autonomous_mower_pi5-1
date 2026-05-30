@@ -29,6 +29,8 @@ class ArduinoBridge(Node):
             10
         )
         self.serial_timer = self.create_timer(0.05, self.read_serial)
+        self.heartbeat_timer = self.create_timer(0.5, self.send_heartbeat)
+        self.send_heartbeat()
 
         self.get_logger().info('Ready. Publish String commands to /mower/arduino_cmd')
 
@@ -37,8 +39,14 @@ class ArduinoBridge(Node):
         if not command:
             return
 
-        self.serial.write((command + '\n').encode('utf-8'))
+        self.write_command(command)
         self.get_logger().info(f'Sent to Arduino: {command}')
+
+    def write_command(self, command):
+        self.serial.write((command + '\n').encode('utf-8'))
+
+    def send_heartbeat(self):
+        self.write_command('BRIDGE_HEARTBEAT')
 
     def read_serial(self):
         waiting = self.serial.in_waiting
@@ -56,6 +64,7 @@ class ArduinoBridge(Node):
 
     def destroy_node(self):
         if hasattr(self, 'serial') and self.serial.is_open:
+            self.write_command('PWM_OFF')
             self.serial.close()
         super().destroy_node()
 
