@@ -1,6 +1,7 @@
 const byte LEFT_SPEED_PIN = 2;
 const byte RIGHT_SPEED_PIN = 3;
-const byte PWM_OUT_PIN = 9;
+const byte LEFT_PWM_OUT_PIN = 9;
+const byte RIGHT_PWM_OUT_PIN = 10;
 
 volatile unsigned long left_pulses = 0;
 volatile unsigned long right_pulses = 0;
@@ -11,7 +12,8 @@ unsigned long last_report_ms = 0;
 const unsigned long REPORT_INTERVAL_MS = 200;
 const unsigned long BRIDGE_TIMEOUT_MS = 1000;
 
-int pwm_value = 0;
+int left_pwm_value = 0;
+int right_pwm_value = 0;
 bool bridge_connected = false;
 unsigned long last_bridge_ms = 0;
 bool calibration_active = false;
@@ -28,18 +30,31 @@ void rightPulseISR() {
   right_total_pulses++;
 }
 
-void setPwm(int value) {
-  pwm_value = constrain(value, 0, 255);
-  analogWrite(PWM_OUT_PIN, pwm_value);
+void writePwmOutputs() {
+  analogWrite(LEFT_PWM_OUT_PIN, left_pwm_value);
+  analogWrite(RIGHT_PWM_OUT_PIN, right_pwm_value);
+}
 
-  Serial.print("OK PWM ");
-  Serial.println(pwm_value);
+void setDrivePwm(int left_value, int right_value) {
+  left_pwm_value = constrain(left_value, 0, 255);
+  right_pwm_value = constrain(right_value, 0, 255);
+  writePwmOutputs();
+
+  Serial.print("OK DRIVE ");
+  Serial.print(left_pwm_value);
+  Serial.print(" ");
+  Serial.println(right_pwm_value);
+}
+
+void setBothPwm(int value) {
+  setDrivePwm(value, value);
 }
 
 void stopPwmForSafety(const char *reason) {
-  if (pwm_value != 0) {
-    pwm_value = 0;
-    analogWrite(PWM_OUT_PIN, pwm_value);
+  if (left_pwm_value != 0 || right_pwm_value != 0) {
+    left_pwm_value = 0;
+    right_pwm_value = 0;
+    writePwmOutputs();
 
     Serial.print("SAFE_STOP ");
     Serial.println(reason);
@@ -144,15 +159,18 @@ void setup() {
   pinMode(LEFT_SPEED_PIN, INPUT_PULLUP);
   pinMode(RIGHT_SPEED_PIN, INPUT_PULLUP);
 
-  pinMode(PWM_OUT_PIN, OUTPUT);
-  analogWrite(PWM_OUT_PIN, pwm_value);
+  pinMode(LEFT_PWM_OUT_PIN, OUTPUT);
+  pinMode(RIGHT_PWM_OUT_PIN, OUTPUT);
+  writePwmOutputs();
 
   attachInterrupt(digitalPinToInterrupt(LEFT_SPEED_PIN), leftPulseISR, RISING);
   attachInterrupt(digitalPinToInterrupt(RIGHT_SPEED_PIN), rightPulseISR, RISING);
 
   Serial.println("BOOT UNO_R4_SPEED_PWM_TOTAL_TEST");
   Serial.print("PWM_START ");
-  Serial.println(pwm_value);
+  Serial.print(left_pwm_value);
+  Serial.print(" ");
+  Serial.println(right_pwm_value);
 }
 
 void loop() {
@@ -171,8 +189,10 @@ void loop() {
       digitalWrite(LED_BUILTIN, LOW);
       Serial.println("OK LED_OFF");
     } else if (cmd == "STATUS") {
-      Serial.print("STATUS OK PWM ");
-      Serial.print(pwm_value);
+      Serial.print("STATUS OK LEFT_PWM ");
+      Serial.print(left_pwm_value);
+      Serial.print(" RIGHT_PWM ");
+      Serial.print(right_pwm_value);
       Serial.print(" CAL_ACTIVE ");
       Serial.print(calibration_active ? 1 : 0);
       Serial.print(" BRIDGE_CONNECTED ");
@@ -194,23 +214,34 @@ void loop() {
     } else if (cmd == "RESET_COUNTS") {
       resetCounts();
     } else if (cmd == "PWM_OFF") {
-      setPwm(0);
+      setBothPwm(0);
     } else if (cmd == "PWM_SLOW") {
       if (requireBridgeForMotion()) {
-        setPwm(20);
+        setBothPwm(20);
       }
     } else if (cmd == "PWM_UP") {
       if (requireBridgeForMotion()) {
-        setPwm(pwm_value + 5);
+        setBothPwm(max(left_pwm_value, right_pwm_value) + 5);
       }
     } else if (cmd == "PWM_DOWN") {
       if (requireBridgeForMotion()) {
-        setPwm(pwm_value - 5);
+        setBothPwm(max(left_pwm_value, right_pwm_value) - 5);
       }
     } else if (cmd.startsWith("PWM ")) {
       int value = cmd.substring(4).toInt();
       if (value == 0 || requireBridgeForMotion()) {
-        setPwm(value);
+        setBothPwm(value);
+      }
+    } else if (cmd.startsWith("DRIVE ")) {
+      int separator = cmd.indexOf(' ', 6);
+      if (separator < 0) {
+        Serial.println("ERR DRIVE_FORMAT");
+      } else {
+        int left_value = cmd.substring(6, separator).toInt();
+        int right_value = cmd.substring(separator + 1).toInt();
+        if ((left_value == 0 && right_value == 0) || requireBridgeForMotion()) {
+          setDrivePwm(left_value, right_value);
+        }
       }
     } else {
       Serial.print("UNKNOWN ");
@@ -253,6 +284,8 @@ void loop() {
     Serial.print(" ");
     Serial.print(rt);
     Serial.print(" PWM ");
-    Serial.println(pwm_value);
+    Serial.print(left_pwm_value);
+    Serial.print(" ");
+    Serial.println(right_pwm_value);
   }
 }

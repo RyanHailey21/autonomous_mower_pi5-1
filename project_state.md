@@ -99,17 +99,18 @@ Sensors:
 
 The Arduino firmware currently supports:
 
-* PWM output on pin D9
+* Left PWM output on D9
+* Right PWM output on D10
 * Left speed pulse input on D2
 * Right speed pulse input on D3
-* Serial commands such as `PWM_OFF`, `PWM_SLOW`, `PWM <value>`, `RESET_COUNTS`, `CAL_START`, `CAL_STOP <revolutions>`, `BRIDGE_HEARTBEAT`, `PING`, `LED_ON`, and `LED_OFF`
+* Serial commands such as `DRIVE <left_pwm> <right_pwm>`, `PWM_OFF`, `PWM_SLOW`, `PWM <value>`, `RESET_COUNTS`, `CAL_START`, `CAL_STOP <revolutions>`, `BRIDGE_HEARTBEAT`, `PING`, `LED_ON`, and `LED_OFF`
 * PWM defaults to 0 on boot and nonzero PWM commands require an active ROS2 bridge heartbeat
 * Periodic serial output of speed pulse counts, frequency, total counts, and PWM value
 
 Example output:
 
 ```text
-SPEED_COUNTS 7 0 HZ 35.0 0.0 TOTAL 587 0 PWM 20
+SPEED_COUNTS 7 0 HZ 35.0 0.0 TOTAL 587 0 PWM 20 20
 ```
 
 Only one motor was connected during the latest test. At `PWM 20`, the connected ZS-X11H speed output produced a stable signal around 35–40 Hz.
@@ -162,6 +163,20 @@ In a second terminal, publish a command:
 cd ~/mower_ws
 make led-on
 make led-off
+```
+
+Send a ROS2 `geometry_msgs/msg/Twist` drive command:
+
+```bash
+cd ~/mower_ws
+make teleop
+```
+
+For one-shot testing without keyboard teleop:
+
+```bash
+make twist LINEAR=0.10 ANGULAR=0.00
+make stop
 ```
 
 Compile Arduino firmware:
@@ -221,7 +236,7 @@ Field meaning:
 SPEED_COUNTS <left_count_this_window> <right_count_this_window>
 HZ           <left_frequency_hz>     <right_frequency_hz>
 TOTAL        <left_total_count>      <right_total_count>
-PWM          <current_pwm_value>
+PWM          <left_pwm_value>        <right_pwm_value>
 ```
 
 For the example above:
@@ -229,7 +244,7 @@ For the example above:
 * `7 0` means 7 left pulses and 0 right pulses during the latest 200 ms window.
 * `35.0 0.0` means the left speed signal is currently about 35 Hz and the right is 0 Hz.
 * `587 0` means the Arduino has counted 587 total left pulses and 0 total right pulses since boot or the last reset.
-* `PWM 20` means the PWM output on D9 is currently set to 20 out of 255.
+* `PWM 20 20` means left D9 and right D10 PWM are both currently set to 20 out of 255.
 
 Useful commands can be typed into the serial monitor and sent with Enter:
 
@@ -239,6 +254,7 @@ PWM_OFF
 PWM_SLOW
 PWM 20
 PWM 30
+DRIVE 20 20
 PWM_UP
 PWM_DOWN
 STATUS
@@ -260,6 +276,69 @@ make pwm VALUE=20
 ```
 
 The firmware stops PWM if the bridge heartbeat is missing for about 1 second. Direct serial monitor mode is best for reading counts and calibration; motor motion commands should go through the bridge heartbeat path. Increase PWM slowly only when the mower is safely supported, the wheels are clear, and the motor driver wiring has been checked.
+
+## Driving With ROS2 Twist
+
+The bridge subscribes to:
+
+```text
+/cmd_vel geometry_msgs/msg/Twist
+```
+
+It converts `linear.x` and `angular.z` into left/right PWM values and sends:
+
+```text
+DRIVE <left_pwm> <right_pwm>
+```
+
+to the Arduino. This is the preferred control path for normal robot driving because teleop, Nav2, and later autonomy nodes can all publish standard `Twist` messages.
+
+Keyboard teleop:
+
+```bash
+make teleop
+```
+
+This runs the standard ROS2 `teleop_twist_keyboard` node, which publishes `geometry_msgs/msg/Twist` messages to `/cmd_vel` from keyboard input. Keep this terminal focused so it can read key presses.
+
+Important keyboard notes:
+
+```text
+i    drive forward
+,    drive backward, currently clamped to stop until direction control is wired
+j/l  turn left/right, currently one side may clamp to 0 because reverse is not wired
+k    stop
+q/z  increase/decrease max speed only; these do not move the motors by themselves
+w/x  increase/decrease linear speed only; these do not move the motors by themselves
+e/c  increase/decrease angular speed only; these do not move the motors by themselves
+```
+
+To verify teleop is publishing movement commands, use a third terminal:
+
+```bash
+make cmd-echo
+```
+
+When you press `i` in the teleop terminal, `make cmd-echo` should show a nonzero `linear.x`, and the bridge terminal should log `Sent drive PWM: ...`.
+
+One-shot test commands:
+
+```bash
+make twist LINEAR=0.10 ANGULAR=0.00   # slow forward
+make twist LINEAR=0.10 ANGULAR=0.40   # slow forward arc
+make stop                             # zero Twist command
+```
+
+Current bridge defaults:
+
+```text
+wheel_separation_m: 0.52
+max_linear_mps:     0.50
+max_pwm:            60
+cmd_vel_timeout_s:  0.50
+```
+
+If no `/cmd_vel` arrives for `cmd_vel_timeout_s`, the bridge sends `DRIVE 0 0`. Negative wheel speeds are currently clamped to 0 because the ZS-X11H speed command path only has 0-5V speed control wired here; direction control should be added separately before supporting reverse or in-place turns.
 
 ## Calibrating Speed Counts Per Revolution
 
@@ -326,7 +405,7 @@ The ROS2 bridge continuously drains and logs Arduino serial output while it is r
 1. Connect and test both BLDC motor driver speed pulse outputs.
 2. Verify the 205 counts/rev calibration on both wheels.
 3. Convert pulse counts to wheel speed.
-4. Add left/right PWM outputs for differential drive.
+4. Wire and test right PWM output on D10.
 5. Update the serial protocol from raw string commands to structured mower commands.
 6. Publish wheel speed or odometry data into ROS2.
 7. Add IMU integration and fuse wheel odometry with IMU using `robot_localization`.
