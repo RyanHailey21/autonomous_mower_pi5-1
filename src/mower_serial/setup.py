@@ -15,8 +15,8 @@ setup(
     zip_safe=True,
     maintainer='ryanh',
     maintainer_email='ryanh@todo.todo',
-    description='TODO: Package description',
-    license='TODO: License declaration',
+    description='Debug serial bridge for low-level Arduino mower commands.',
+    license='Apache-2.0',
     extras_require={
         'test': [
             'pytest',

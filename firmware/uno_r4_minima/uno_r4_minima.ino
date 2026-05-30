@@ -19,6 +19,8 @@ unsigned long last_bridge_ms = 0;
 bool calibration_active = false;
 unsigned long calibration_left_start = 0;
 unsigned long calibration_right_start = 0;
+float last_left_hz = 0.0;
+float last_right_hz = 0.0;
 
 void leftPulseISR() {
   left_pulses++;
@@ -117,6 +119,25 @@ void printCalibrationCounts(const char *label) {
   Serial.println(right_total - calibration_right_start);
 }
 
+void printState(float left_hz, float right_hz) {
+  unsigned long left_total;
+  unsigned long right_total;
+  getTotalCounts(left_total, right_total);
+
+  Serial.print("STATE LEFT_TOTAL ");
+  Serial.print(left_total);
+  Serial.print(" RIGHT_TOTAL ");
+  Serial.print(right_total);
+  Serial.print(" LEFT_HZ ");
+  Serial.print(left_hz, 1);
+  Serial.print(" RIGHT_HZ ");
+  Serial.print(right_hz, 1);
+  Serial.print(" PWM ");
+  Serial.print(left_pwm_value);
+  Serial.print(" ");
+  Serial.println(right_pwm_value);
+}
+
 void stopCalibration(float revolutions) {
   if (!calibration_active) {
     Serial.println("ERR CAL_NOT_ACTIVE");
@@ -197,6 +218,8 @@ void loop() {
       Serial.print(calibration_active ? 1 : 0);
       Serial.print(" BRIDGE_CONNECTED ");
       Serial.println(bridge_connected ? 1 : 0);
+    } else if (cmd == "STATE?") {
+      printState(last_left_hz, last_right_hz);
     } else if (cmd == "CAL_START") {
       startCalibration();
     } else if (cmd == "CAL_STATUS") {
@@ -270,6 +293,8 @@ void loop() {
 
     float left_hz = (lp * 1000.0) / REPORT_INTERVAL_MS;
     float right_hz = (rp * 1000.0) / REPORT_INTERVAL_MS;
+    last_left_hz = left_hz;
+    last_right_hz = right_hz;
 
     Serial.print("SPEED_COUNTS ");
     Serial.print(lp);

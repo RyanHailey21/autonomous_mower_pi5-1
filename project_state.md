@@ -151,7 +151,13 @@ cd ~/mower_ws
 make ros-build
 ```
 
-Run the serial bridge:
+Run the ROS2 control mower base stack:
+
+```bash
+make base
+```
+
+Run the serial bridge for low-level debug instead of ROS2 control:
 
 ```bash
 make bridge
@@ -165,7 +171,7 @@ make led-on
 make led-off
 ```
 
-Send a ROS2 `geometry_msgs/msg/Twist` drive command:
+Start keyboard teleop for the ROS2 control drive stack:
 
 ```bash
 cd ~/mower_ws
@@ -279,19 +285,29 @@ The firmware stops PWM if the bridge heartbeat is missing for about 1 second. Di
 
 ## Driving With ROS2 Twist
 
-The bridge subscribes to:
+Normal driving should use the ROS2 control stack:
 
 ```text
-/cmd_vel geometry_msgs/msg/Twist
+teleop_twist_keyboard / Nav2
+  -> /diff_drive_controller/cmd_vel
+  -> diff_drive_controller
+  -> mower_base hardware interface
+  -> Arduino DRIVE command
 ```
 
-It converts `linear.x` and `angular.z` into left/right PWM values and sends:
+With `make base`, the installed Jazzy `diff_drive_controller` subscribes to:
+
+```text
+/diff_drive_controller/cmd_vel geometry_msgs/msg/TwistStamped
+```
+
+The `make teleop` shortcut runs `teleop_twist_keyboard` with `stamped:=true` and remaps its command topic to the controller. The `mower_base` hardware interface converts controller wheel velocity commands into:
 
 ```text
 DRIVE <left_pwm> <right_pwm>
 ```
 
-to the Arduino. This is the preferred control path for normal robot driving because teleop, Nav2, and later autonomy nodes can all publish standard `Twist` messages.
+for the Arduino. The preferred control path is `make base`; the Python `mower_serial` bridge remains useful only for bench/debug commands on `/mower/arduino_cmd`.
 
 Keyboard teleop:
 
@@ -299,7 +315,7 @@ Keyboard teleop:
 make teleop
 ```
 
-This runs the standard ROS2 `teleop_twist_keyboard` node, which publishes `geometry_msgs/msg/Twist` messages to `/cmd_vel` from keyboard input. Keep this terminal focused so it can read key presses.
+This runs the standard ROS2 `teleop_twist_keyboard` node in stamped mode so it publishes `geometry_msgs/msg/TwistStamped` messages to `/diff_drive_controller/cmd_vel` from keyboard input. Keep this terminal focused so it can read key presses.
 
 Important keyboard notes:
 
@@ -319,26 +335,77 @@ To verify teleop is publishing movement commands, use a third terminal:
 make cmd-echo
 ```
 
-When you press `i` in the teleop terminal, `make cmd-echo` should show a nonzero `linear.x`, and the bridge terminal should log `Sent drive PWM: ...`.
+When you press `i` in the teleop terminal, `make cmd-echo` should show a nonzero `twist.linear.x`. In ROS2 control mode, `/joint_states` and `/odom` are the main feedback topics.
 
 One-shot test commands:
 
 ```bash
 make twist LINEAR=0.10 ANGULAR=0.00   # slow forward
 make twist LINEAR=0.10 ANGULAR=0.40   # slow forward arc
-make stop                             # zero Twist command
+make stop                             # zero TwistStamped command
 ```
 
-Current bridge defaults:
+If no controller command arrives for `cmd_vel_timeout`, `diff_drive_controller` stops commanding wheel velocity. Negative wheel speeds are currently clamped to 0 in the hardware interface because the ZS-X11H speed command path only has 0-5V speed control wired here; direction control should be added separately before supporting reverse or in-place turns.
+
+## ROS2 Control Base Stack
+
+The `mower_base` package provides a C++ `hardware_interface::SystemInterface` plugin for `ros2_control`.
+
+Configured interfaces:
 
 ```text
-wheel_separation_m: 0.52
-max_linear_mps:     0.50
-max_pwm:            60
-cmd_vel_timeout_s:  0.50
+left_wheel_joint/velocity   command
+right_wheel_joint/velocity  command
+left_wheel_joint/position   state
+left_wheel_joint/velocity   state
+right_wheel_joint/position  state
+right_wheel_joint/velocity  state
 ```
 
-If no `/cmd_vel` arrives for `cmd_vel_timeout_s`, the bridge sends `DRIVE 0 0`. Negative wheel speeds are currently clamped to 0 because the ZS-X11H speed command path only has 0-5V speed control wired here; direction control should be added separately before supporting reverse or in-place turns.
+The hardware interface sends `STATE?` to the Arduino, parses:
+
+```text
+STATE LEFT_TOTAL <count> RIGHT_TOTAL <count> LEFT_HZ <hz> RIGHT_HZ <hz> PWM <left_pwm> <right_pwm>
+```
+
+and converts counts to wheel radians with:
+
+```text
+wheel_radians = total_counts * 2*pi / 205
+```
+
+Launch:
+
+```bash
+make base
+```
+
+If `controller_manager` is missing, install the ROS2 control runtime package:
+
+```bash
+sudo apt-get install ros-jazzy-controller-manager
+```
+
+Then drive with:
+
+```bash
+make teleop
+```
+
+Useful ROS2 control checks:
+
+```bash
+ros2 control list_hardware_components
+ros2 control list_controllers
+ros2 topic echo /joint_states
+ros2 topic echo /odom
+```
+
+If the `ros2 control` command is not available, install the CLI extension:
+
+```bash
+sudo apt-get install ros-jazzy-ros2controlcli
+```
 
 ## Calibrating Speed Counts Per Revolution
 

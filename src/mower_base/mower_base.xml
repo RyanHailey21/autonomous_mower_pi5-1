@@ -1,0 +1,8 @@
+<library path="mower_base">
+  <class
+    name="mower_base/MowerHardware"
+    type="mower_base::MowerHardware"
+    base_class_type="hardware_interface::SystemInterface">
+    <description>Serial ROS2 control hardware interface for the mower drive base.</description>
+  </class>
+</library>

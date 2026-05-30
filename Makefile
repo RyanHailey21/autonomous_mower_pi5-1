@@ -12,18 +12,20 @@ VALUE ?= 20
 REVS ?= 10
 LINEAR ?= 0.10
 ANGULAR ?= 0.00
+CMD_VEL_TOPIC ?= /diff_drive_controller/cmd_vel
 
-.PHONY: help ros-build bridge teleop cmd-echo cmd twist stop ping led-on led-off reset pwm pwm-off cal-start cal-status cal-stop cal-cancel arduino-build arduino-upload monitor
+.PHONY: help ros-build base bridge teleop cmd-echo cmd twist stop ping led-on led-off reset pwm pwm-off cal-start cal-status cal-stop cal-cancel arduino-build arduino-upload monitor
 
 help:
 	@printf '%s\n' \
 	  'Common commands:' \
 	  '  make ros-build        Build the ROS2 workspace' \
+	  '  make base             Run the ros2_control mower base stack' \
 	  '  make bridge           Run the ROS2 Arduino bridge' \
-	  '  make teleop           Drive with keyboard teleop on /cmd_vel' \
-	  '  make cmd-echo         Watch /cmd_vel Twist messages' \
-	  '  make twist            Send one /cmd_vel Twist sample' \
-	  '  make stop             Send a zero /cmd_vel Twist sample' \
+	  '  make teleop           Drive with keyboard teleop through diff_drive_controller' \
+	  '  make cmd-echo         Watch controller velocity commands' \
+	  '  make twist            Send one controller TwistStamped sample' \
+	  '  make stop             Send a zero controller TwistStamped sample' \
 	  '  make cmd CMD=PING     Send any Arduino command through ROS2' \
 	  '  make ping             Send PING' \
 	  '  make led-on           Turn built-in LED on' \
@@ -45,6 +47,11 @@ help:
 ros-build:
 	colcon build
 
+base:
+	source $(ROS_SETUP)
+	source install/setup.bash
+	ros2 launch mower_base mower_base.launch.py
+
 bridge:
 	source $(ROS_SETUP)
 	source install/setup.bash
@@ -53,12 +60,12 @@ bridge:
 teleop:
 	source $(ROS_SETUP)
 	source install/setup.bash
-	ros2 run teleop_twist_keyboard teleop_twist_keyboard
+	ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p stamped:=true -r cmd_vel:=$(CMD_VEL_TOPIC)
 
 cmd-echo:
 	source $(ROS_SETUP)
 	source install/setup.bash
-	ros2 topic echo /cmd_vel
+	ros2 topic echo $(CMD_VEL_TOPIC)
 
 cmd:
 	source $(ROS_SETUP)
@@ -68,7 +75,7 @@ cmd:
 twist:
 	source $(ROS_SETUP)
 	source install/setup.bash
-	ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist "{linear: {x: $(LINEAR)}, angular: {z: $(ANGULAR)}}"
+	ros2 topic pub --once $(CMD_VEL_TOPIC) geometry_msgs/msg/TwistStamped "{header: {frame_id: base_link}, twist: {linear: {x: $(LINEAR)}, angular: {z: $(ANGULAR)}}}"
 
 stop:
 	$(MAKE) twist LINEAR=0.0 ANGULAR=0.0
