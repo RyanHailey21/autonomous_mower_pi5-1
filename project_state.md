@@ -102,7 +102,7 @@ The Arduino firmware currently supports:
 * PWM output on pin D9
 * Left speed pulse input on D2
 * Right speed pulse input on D3
-* Serial commands such as `PWM_OFF`, `PWM_SLOW`, `PWM <value>`, `RESET_COUNTS`, `PING`, `LED_ON`, and `LED_OFF`
+* Serial commands such as `PWM_OFF`, `PWM_SLOW`, `PWM <value>`, `RESET_COUNTS`, `CAL_START`, `CAL_STOP <revolutions>`, `PING`, `LED_ON`, and `LED_OFF`
 * Periodic serial output of speed pulse counts, frequency, total counts, and PWM value
 
 Example output:
@@ -146,36 +146,162 @@ Build the ROS2 workspace:
 
 ```bash
 cd ~/mower_ws
-colcon build
-source install/setup.bash
+make ros-build
 ```
 
 Run the serial bridge:
 
 ```bash
-ros2 run mower_serial arduino_bridge
+make bridge
 ```
 
 In a second terminal, publish a command:
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source ~/mower_ws/install/setup.bash
-
-ros2 topic pub --once /mower/arduino_cmd std_msgs/msg/String "{data: 'LED_ON'}"
+cd ~/mower_ws
+make led-on
+make led-off
 ```
 
 Compile Arduino firmware:
 
 ```bash
-arduino-cli compile --fqbn arduino:renesas_uno:minima ~/mower_ws/firmware/uno_r4_minima
+make arduino-build
 ```
 
 Upload Arduino firmware:
 
 ```bash
-arduino-cli upload -p /dev/ttyACM0 --fqbn arduino:renesas_uno:minima ~/mower_ws/firmware/uno_r4_minima
+make arduino-upload
 ```
+
+Show all shortcut commands:
+
+```bash
+make help
+```
+
+## Reading Hall Sensor Counts in the Terminal
+
+The current Arduino firmware counts speed pulses from the BLDC driver speed outputs:
+
+```text
+Left speed input:  Arduino D2
+Right speed input: Arduino D3
+Baud rate:         115200
+Serial port:       /dev/ttyACM0
+```
+
+Only one program can use `/dev/ttyACM0` at a time. Stop the ROS2 `arduino_bridge` before opening the Arduino serial monitor directly.
+
+Start the serial monitor from the Pi:
+
+```bash
+cd ~/mower_ws
+make monitor
+```
+
+After reset, the Arduino should print:
+
+```text
+BOOT UNO_R4_SPEED_PWM_TOTAL_TEST
+PWM_START 20
+```
+
+The firmware then prints hall/speed counts about every 200 ms:
+
+```text
+SPEED_COUNTS 7 0 HZ 35.0 0.0 TOTAL 587 0 PWM 20
+```
+
+Field meaning:
+
+```text
+SPEED_COUNTS <left_count_this_window> <right_count_this_window>
+HZ           <left_frequency_hz>     <right_frequency_hz>
+TOTAL        <left_total_count>      <right_total_count>
+PWM          <current_pwm_value>
+```
+
+For the example above:
+
+* `7 0` means 7 left pulses and 0 right pulses during the latest 200 ms window.
+* `35.0 0.0` means the left speed signal is currently about 35 Hz and the right is 0 Hz.
+* `587 0` means the Arduino has counted 587 total left pulses and 0 total right pulses since boot or the last reset.
+* `PWM 20` means the PWM output on D9 is currently set to 20 out of 255.
+
+Useful commands can be typed into the serial monitor and sent with Enter:
+
+```text
+RESET_COUNTS
+PWM_OFF
+PWM_SLOW
+PWM 20
+PWM 30
+PWM_UP
+PWM_DOWN
+STATUS
+CAL_START
+CAL_STATUS
+CAL_STOP 10
+CAL_CANCEL
+PING
+```
+
+Suggested test flow:
+
+```text
+RESET_COUNTS
+PWM 20
+```
+
+Then watch the `SPEED_COUNTS`, `HZ`, and `TOTAL` fields. Increase PWM slowly only when the mower is safely supported, the wheels are clear, and the motor driver wiring has been checked.
+
+## Calibrating Speed Counts Per Revolution
+
+The firmware can measure how many speed pulses correspond to a known number of wheel revolutions.
+
+Basic direct-serial calibration flow:
+
+```text
+CAL_START
+```
+
+Rotate the wheel by a known number of revolutions, for example 10 full wheel turns. Then send:
+
+```text
+CAL_STOP 10
+```
+
+The Arduino prints a result like:
+
+```text
+CAL_RESULT REVS 10.000 LEFT_COUNTS 420 RIGHT_COUNTS 0 LEFT_COUNTS_PER_REV 42.000 RIGHT_COUNTS_PER_REV 0.000
+```
+
+Useful calibration commands:
+
+```text
+CAL_START             Start a calibration window from the current total counts
+CAL_STATUS            Show counts accumulated since CAL_START
+CAL_STOP <revs>       End calibration and print counts per revolution
+CAL_CANCEL            Exit calibration without calculating a result
+```
+
+For best accuracy, calibrate one wheel at a time, use several revolutions, and keep the wheel turning in one direction. If only one motor speed output is connected, the other side should stay near zero.
+
+If the ROS2 bridge is running instead of the direct serial monitor, send commands from a second terminal:
+
+```bash
+cd ~/mower_ws
+make reset
+make pwm VALUE=20
+make cal-start
+make cal-stop REVS=10
+make pwm-off
+```
+
+The ROS2 bridge continuously drains and logs Arduino serial output while it is running, including `SPEED_COUNTS` telemetry and command replies. This keeps the Arduino from blocking on serial output after the first command. The direct `arduino-cli monitor` terminal is still useful when you want to interact with the Arduino without ROS2 in the middle.
 
 ## Near-Term Development Goals
 

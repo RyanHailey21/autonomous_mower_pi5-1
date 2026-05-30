@@ -1,9 +1,11 @@
 import time
-import serial 
+
+import serial
 
 import rclpy
-from rclpy.node import Node 
+from rclpy.node import Node
 from std_msgs.msg import String
+
 
 class ArduinoBridge(Node):
     def __init__(self):
@@ -16,8 +18,9 @@ class ArduinoBridge(Node):
         baud = self.get_parameter('baud').value
 
         self.get_logger().info(f'Opening serial port {port} at {baud} baud')
-        self.serial = serial.Serial(port, baud, timeout = 1)
+        self.serial = serial.Serial(port, baud, timeout=0)
         time.sleep(2)
+        self._serial_rx_buffer = bytearray()
 
         self.subscription = self.create_subscription(
             String,
@@ -25,6 +28,7 @@ class ArduinoBridge(Node):
             self.command_callback,
             10
         )
+        self.serial_timer = self.create_timer(0.05, self.read_serial)
 
         self.get_logger().info('Ready. Publish String commands to /mower/arduino_cmd')
 
@@ -34,12 +38,21 @@ class ArduinoBridge(Node):
             return
 
         self.serial.write((command + '\n').encode('utf-8'))
+        self.get_logger().info(f'Sent to Arduino: {command}')
 
-        response = self.serial.readline().decode(errors='ignore').strip()
-        if response:
-            self.get_logger().info(f'Arduino replied: {response}')
-        else:
-            self.get_logger().warn('No response from Arduino')
+    def read_serial(self):
+        waiting = self.serial.in_waiting
+        if not waiting:
+            return
+
+        self._serial_rx_buffer.extend(self.serial.read(waiting))
+
+        while b'\n' in self._serial_rx_buffer:
+            raw_line, _, remaining = self._serial_rx_buffer.partition(b'\n')
+            self._serial_rx_buffer = bytearray(remaining)
+            line = raw_line.decode(errors='ignore').strip()
+            if line:
+                self.get_logger().info(f'Arduino: {line}')
 
     def destroy_node(self):
         if hasattr(self, 'serial') and self.serial.is_open:
